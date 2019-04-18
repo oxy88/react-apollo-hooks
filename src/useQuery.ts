@@ -182,34 +182,52 @@ export function useQuery<
     [shouldSkip, responseId, observableQuery]
   );
 
-  useEffect(
-    () => {
-      if (shouldSkip) {
-        return;
-      }
+  useEffect(() => {
+    if (!watchedQuery) {
+      return 
+    }
 
-      const invalidateCurrentResult = () => {
-        // A hack to get rid React warnings during tests. The default
-        // implementation of `actHack` just invokes the callback immediately.
-        // In tests, it's replaced with `act` from react-testing-library.
-        // A better solution welcome.
-        actHack(() => {
-          setResponseId(x => x + 1);
-        });
-      };
-      const subscription = observableQuery.subscribe(
+    let subscription
+
+    // if fetchPolicy='cache-and-network' and data is on cache
+    // notifyOnNetworkStatusChange is aways TRUE, why?? 
+    // this "if" fix it.
+    function invalidateCurrentResult(props) {
+      if (props.loading) return
+      setResponseID(x => x + 1)
+    } 
+
+    // from: https://github.com/apollographql/react-apollo/blob/master/src/Query.tsx#L363
+    // after a error on refetch, without this fix, refetch never works again
+    function invalidateErrorResult() {
+      unsubscribe()
+
+      const lastError  = watchedQuery.getLastError()
+      const lastResult = watchedQuery.getLastResult()
+
+      watchedQuery.resetLastResults()
+      subscribe() 
+
+      Object.assign(watchedQuery, { lastError, lastResult })
+      setResponseID(x => x + 1)
+    }
+    
+    function subscribe() {
+      subscription = watchedQuery.subscribe(
         invalidateCurrentResult,
-        invalidateCurrentResult
-      );
+        invalidateErrorResult
+      )
+    }
 
-      invalidateCachedObservableQuery(client, watchQueryOptions);
+    function unsubscribe() {
+      if (subscription) subscription.unsubscribe() 
+      subscription = undefined
+    }
 
-      return () => {
-        subscription.unsubscribe();
-      };
-    },
-    [shouldSkip, observableQuery]
-  );
+    subscribe()
+    return unsubscribe
+
+  }, [watchedQuery])
 
   ensureSupportedFetchPolicy(suspend, fetchPolicy);
 
